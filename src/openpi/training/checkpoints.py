@@ -7,6 +7,7 @@ import logging
 from typing import Protocol
 
 from etils import epath
+from flax import nnx
 import jax
 import orbax.checkpoint as ocp
 import orbax.checkpoint.future as future
@@ -41,7 +42,7 @@ def initialize_checkpoint_dir(
         checkpoint_dir,
         item_handlers={
             "assets": CallbackHandler(),
-            # "train_state": ocp.PyTreeCheckpointHandler(),
+            "train_state": ocp.PyTreeCheckpointHandler(),
             "params": ocp.PyTreeCheckpointHandler(),
         },
         options=ocp.CheckpointManagerOptions(
@@ -75,12 +76,13 @@ def save_state(
         if norm_stats is not None and data_config.asset_id is not None:
             _normalize.save(directory / data_config.asset_id, norm_stats)
 
-    # Split params that can be used for inference into a separate item.
+    # Split inference params from the optimizer-bearing state so large model
+    # weights (and EMA weights, when enabled) are not written twice.
     with at.disable_typechecking():
         train_state, params = _split_params(state)
     items = {
         "assets": save_assets,
-        # "train_state": train_state,
+        "train_state": train_state,
         "params": {"params": params},
     }
     checkpoint_manager.save(step, items)
@@ -95,12 +97,11 @@ def restore_state(
     del data_loader
 
     with at.disable_typechecking():
-        # Split params that can be used for inference into a separate item.
         train_state, params = _split_params(state)
         restored = checkpoint_manager.restore(
             step,
             items={
-                # "train_state": train_state,
+                "train_state": train_state,
                 "params": {"params": params},
             },
         )
@@ -158,10 +159,6 @@ def _merge_params(train_state: training_utils.TrainState, params: dict[str, at.P
         return dataclasses.replace(train_state, ema_params=params["params"])
     return dataclasses.replace(train_state, params=params["params"])
 
-
-
-from flax import nnx
-
 def save_state_trainable_only(
     checkpoint_manager: ocp.CheckpointManager,
     state: training_utils.TrainState,
@@ -181,22 +178,19 @@ def save_state_trainable_only(
     ema_params = state.ema_params
     params = state.params
     train_state = dataclasses.replace(state, ema_params=None, params=nnx.statelib.State({}))
-    
-    if ema_params is not None:
-        params_to_save = ema_params
-    else:
-        params_to_save = params.filter(trainable_filter)
-                
+
+    params_to_save = ema_params if ema_params is not None else params.filter(trainable_filter)
+
     items = {
         "assets": save_assets,
         "train_state": train_state,
         "params": {
-            "params":  params_to_save,
+            "params": params_to_save,
             "variables": params.filter(variables_filter),
         },
     }
     checkpoint_manager.save(step, items)
-    
+
 
 def restore_state_trainable_only(
     checkpoint_manager: ocp.CheckpointManager,
@@ -206,7 +200,7 @@ def restore_state_trainable_only(
     trainable_filter: nnx.filterlib.Filter,
     variables_filter: nnx.filterlib.Filter,
     partial_params: at.Params,
-    no_sharding: bool = False
+    no_sharding: bool = False,  # noqa: FBT001, FBT002
 ) -> training_utils.TrainState:
     del data_loader
 
@@ -215,10 +209,10 @@ def restore_state_trainable_only(
         ema_params = state.ema_params
         params = state.params
         train_state = dataclasses.replace(state, ema_params=None, params=nnx.statelib.State({}))
-        
+
         if no_sharding:
-            import numpy as np
             from flax import traverse_util
+            import numpy as np
             mesh = jax.sharding.Mesh(jax.devices(), ("x",))
             sharding = jax.sharding.NamedSharding(mesh, jax.sharding.PartitionSpec())
             path = checkpoint_manager.directory
@@ -237,19 +231,19 @@ def restore_state_trainable_only(
                         ),
                     ),
                 )
-                
+
                 flat_params = traverse_util.flatten_dict(restored_params)
                 if all(kp[-1] == "value" for kp in flat_params):
                     flat_params = {kp[:-1]: v for kp, v in flat_params.items()}
                 restored_params = traverse_util.unflatten_dict(flat_params)
 
-                partial_params = jax.tree.map(lambda x: x.astype(jax.numpy.bfloat16), partial_params)        
+                partial_params = jax.tree.map(lambda x: x.astype(jax.numpy.bfloat16), partial_params)
                 params.replace_by_pure_dict(partial_params) # restore the frozen params (bfloat16)
                 params.replace_by_pure_dict(restored_params["params"]) # restore the trainable params
                 if "variables" in restored_params:
                     params.replace_by_pure_dict(restored_params["variables"]) # restore the variables params
-                
-            
+
+
         else:
             trainable_params = params.filter(trainable_filter)
             variables_params = params.filter(variables_filter)
@@ -260,13 +254,12 @@ def restore_state_trainable_only(
                     "params": {"params": trainable_params, "variables": variables_params},
                 },
             )
-            partial_params = jax.tree.map(lambda x: x.astype(jax.numpy.bfloat16), partial_params)        
+            partial_params = jax.tree.map(lambda x: x.astype(jax.numpy.bfloat16), partial_params)
             params.replace_by_pure_dict(partial_params) # restore the frozen params (bfloat16)
             params.replace_by_pure_dict(restored["params"]["params"].to_pure_dict()) # restore the trainable params
             params.replace_by_pure_dict(restored["params"]["variables"].to_pure_dict()) # restore the variables params
-            
-            
+
+
     if ema_params is not None:
         return dataclasses.replace(restored["train_state"], ema_params=restored["params"]["params"] , params=params)
-    else:
-        return dataclasses.replace(restored["train_state"], params=params)
+    return dataclasses.replace(restored["train_state"], params=params)
