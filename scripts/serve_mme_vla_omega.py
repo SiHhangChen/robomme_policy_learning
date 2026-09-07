@@ -15,7 +15,7 @@ from mme_vla_suite.serving import websocket_policy_server
 
 @dataclasses.dataclass
 class Checkpoint:
-    config: str = "mme_vla_omega_action_modulation"
+    config: str = "mme_vla_omega_wa05_action_modulation"
     dir: str = ""
 
 

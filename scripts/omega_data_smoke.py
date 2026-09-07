@@ -10,7 +10,7 @@ from mme_vla_omega_suite.training.dataloader import create_data_loader
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config-name", default="mme_vla_omega_action_modulation")
+    parser.add_argument("--config-name", default="mme_vla_omega_wa05_action_modulation")
     parser.add_argument("--batch-size", type=int, default=2)
     parser.add_argument("--num-workers", type=int, default=2)
     args = parser.parse_args()

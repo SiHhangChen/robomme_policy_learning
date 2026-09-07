@@ -33,13 +33,23 @@ DEFAULT_DATASET_PATH = os.getenv(
 DEFAULT_OMEGA_CACHE_PATH = os.getenv(
     "OMEGA_CACHE_PATH", "/data1/shared_workspace/chensihang/dataset/baseline/vggt-omega/wa05_vggt_cache"
 )
+WA05_DATASET_PATH = os.getenv("OMEGA_WA05_DATASET_PATH", DEFAULT_DATASET_PATH)
+WA05_OMEGA_CACHE_PATH = os.getenv("OMEGA_WA05_CACHE_PATH", DEFAULT_OMEGA_CACHE_PATH)
 TS01_DATASET_PATH = "/data1/shared_workspace/chensihang/dataset/membench/ts01_200seeds_v061"
 TS01_OMEGA_CACHE_PATH = "/data1/shared_workspace/chensihang/dataset/baseline/vggt-omega/ts01_vggt_cache"
+TS02_DATASET_PATH = "/data1/shared_workspace/chensihang/dataset/membench/ts02_200seeds_v061"
+TS02_OMEGA_CACHE_PATH = "/data1/shared_workspace/chensihang/dataset/baseline/vggt-omega/ts02_vggt_cache"
 WA01_DATASET_PATH = os.getenv(
     "OMEGA_WA01_DATASET_PATH", "/data1/shared_workspace/chensihang/dataset/membench/wa01_200seeds_v061"
 )
 WA01_OMEGA_CACHE_PATH = os.getenv(
     "OMEGA_WA01_CACHE_PATH", "/data1/shared_workspace/chensihang/dataset/baseline/vggt-omega/wa01_vggt_cache"
+)
+WA02_DATASET_PATH = os.getenv(
+    "OMEGA_WA02_DATASET_PATH", "/data1/shared_workspace/chensihang/dataset/membench/wa02_200seeds_v062"
+)
+WA02_OMEGA_CACHE_PATH = os.getenv(
+    "OMEGA_WA02_CACHE_PATH", "/data1/shared_workspace/chensihang/dataset/baseline/vggt-omega/wa02_vggt_cache"
 )
 DEFAULT_PI05_PARAMS_PATH = os.getenv(
     "PI05_BASE_PARAMS_PATH",
@@ -151,6 +161,21 @@ _TS01_MODEL = OmegaPi0Config(
     omega_output_dim=1024,
 )
 
+_WA05_MODEL = OmegaPi0Config(
+    pi05=True,
+    action_horizon=50,
+    max_token_len=200,
+    paligemma_variant="gemma_2b_lora",
+    action_expert_variant="gemma_300m_lora",
+    omega_memory_horizon=8,
+    omega_num_views=3,
+    omega_camera_order=("agentview_left", "agentview_right", "eye_in_hand"),
+    omega_layer_indices=(4, 11, 17, 23),
+    omega_tokens_per_view=17,
+    omega_input_dim=2048,
+    omega_output_dim=1024,
+)
+
 _WA01_MODEL = OmegaPi0Config(
     pi05=True,
     action_horizon=50,
@@ -224,24 +249,16 @@ _CONFIGS = [
         fsdp_devices=3,
     ),
     OmegaTrainConfig(
-        name="mme_vla_omega_action_modulation",
-        model=OmegaPi0Config(
-            pi05=True,
-            action_horizon=20,
-            max_token_len=200,
-            omega_memory_horizon=8,
-            omega_num_views=3,
-            omega_camera_order=("agentview_left", "agentview_right", "eye_in_hand"),
-            omega_layer_indices=(4, 11, 17, 23),
-            omega_tokens_per_view=17,
-            omega_input_dim=2048,
-            omega_output_dim=1024,
-        ),
+        name="mme_vla_omega_wa02_action_condition",
+        model=_WA01_ACTION_CONDITION_MODEL,
         data=OmegaRoboMMEDataConfig(
-            repo_id=DEFAULT_DATASET_PATH,
-            assets=AssetsConfig(asset_id="wa05_200seeds_v061"),
+            repo_id=WA02_DATASET_PATH,
+            assets=AssetsConfig(asset_id="wa02_200seeds_v062"),
         ),
-        batch_size=64,
+        dataset_path=WA02_DATASET_PATH,
+        omega_cache_path=WA02_OMEGA_CACHE_PATH,
+        omega_stride=50,
+        batch_size=48,
         lr_schedule=_optimizer.CosineDecaySchedule(
             warmup_steps=10_000,
             peak_lr=5e-5,
@@ -249,14 +266,41 @@ _CONFIGS = [
             decay_lr=5e-5,
         ),
         optimizer=_optimizer.AdamW(clip_gradient_norm=1.0),
-        freeze_filter=OmegaPi0Config().get_freeze_filter(),
+        freeze_filter=_WA01_ACTION_CONDITION_MODEL.get_freeze_filter(),
         weight_loader=weight_loaders.CheckpointWeightLoader(DEFAULT_PI05_PARAMS_PATH),
-        num_train_steps=80_000,
+        num_train_steps=60_000,
         save_interval=10_000,
         keep_period=10_000,
         num_workers=4,
-        ema_decay=0.999,
-        fsdp_devices=4,
+        ema_decay=None,
+        fsdp_devices=1,
+    ),
+    OmegaTrainConfig(
+        name="mme_vla_omega_wa05_action_modulation",
+        model=_WA05_MODEL,
+        data=OmegaRoboMMEDataConfig(
+            repo_id=WA05_DATASET_PATH,
+            assets=AssetsConfig(asset_id="wa05_200seeds_v061"),
+        ),
+        dataset_path=WA05_DATASET_PATH,
+        omega_cache_path=WA05_OMEGA_CACHE_PATH,
+        omega_stride=50,
+        batch_size=48,
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=10_000,
+            peak_lr=5e-5,
+            decay_steps=100_000,
+            decay_lr=5e-5,
+        ),
+        optimizer=_optimizer.AdamW(clip_gradient_norm=1.0),
+        freeze_filter=_WA05_MODEL.get_freeze_filter(),
+        weight_loader=weight_loaders.CheckpointWeightLoader(DEFAULT_PI05_PARAMS_PATH),
+        num_train_steps=60_000,
+        save_interval=10_000,
+        keep_period=10_000,
+        num_workers=4,
+        ema_decay=None,
+        fsdp_devices=1,
     ),
     OmegaTrainConfig(
         name="mme_vla_omega_ts01_action_modulation",
@@ -267,6 +311,33 @@ _CONFIGS = [
         ),
         dataset_path=TS01_DATASET_PATH,
         omega_cache_path=TS01_OMEGA_CACHE_PATH,
+        omega_stride=50,
+        batch_size=48,
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=10_000,
+            peak_lr=5e-5,
+            decay_steps=100_000,
+            decay_lr=5e-5,
+        ),
+        optimizer=_optimizer.AdamW(clip_gradient_norm=1.0),
+        freeze_filter=_TS01_MODEL.get_freeze_filter(),
+        weight_loader=weight_loaders.CheckpointWeightLoader(DEFAULT_PI05_PARAMS_PATH),
+        num_train_steps=60_000,
+        save_interval=10_000,
+        keep_period=10_000,
+        num_workers=4,
+        ema_decay=None,
+        fsdp_devices=3,
+    ),
+    OmegaTrainConfig(
+        name="mme_vla_omega_ts02_action_modulation",
+        model=_TS01_MODEL,
+        data=OmegaRoboMMEDataConfig(
+            repo_id=TS02_DATASET_PATH,
+            assets=AssetsConfig(asset_id="ts02_200seeds_v061"),
+        ),
+        dataset_path=TS02_DATASET_PATH,
+        omega_cache_path=TS02_OMEGA_CACHE_PATH,
         omega_stride=50,
         batch_size=48,
         lr_schedule=_optimizer.CosineDecaySchedule(

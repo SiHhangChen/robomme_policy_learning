@@ -22,7 +22,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=8001)
     parser.add_argument("--checkpoint-dir", type=Path, required=True)
-    parser.add_argument("--config", default="mme_vla_omega_action_modulation")
+    parser.add_argument("--config", default="mme_vla_omega_wa05_action_modulation")
     parser.add_argument("--seed", type=int, default=7)
     return parser.parse_args()
 
@@ -30,8 +30,9 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     if args.config not in {
-        "mme_vla_omega_action_modulation",
+        "mme_vla_omega_wa05_action_modulation",
         "mme_vla_omega_ts01_action_modulation",
+        "mme_vla_omega_ts02_action_modulation",
         "mme_vla_omega_wa01_action_modulation",
         "mme_vla_omega_wa01_action_condition",
     }:
